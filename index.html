@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>断面づくり</title>
-<!-- 版：2026-11-16a -->
+<!-- 版：2026-11-16b -->
 <style>
 :root{--line:#d5dbe2;--ink:#1b2430;--mut:#667381;--acc:#0b5fae;--sel:#e0a800;--bg:#f4f6f8;--card:#fff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -127,7 +127,7 @@ input,select,textarea{font-size:16px}
     <button class="btn" data-tool="poly">多角形</button>
     <button class="btn" data-tool="dot">通し筋</button>
     <button class="btn" data-tool="bar">断面の筋</button>
-    <button class="btn" data-tool="gl">GL</button>
+    <button class="btn" data-tool="gl">線</button>
     <button class="btn" data-tool="meas">測る</button>
     <button class="btn" id="e-grid">目盛 10</button>
   </div>
@@ -183,9 +183,38 @@ const MATS = {
   con: { name: 'コンクリート', fill: '#e6eaee', c3: CONCRETE, unit: 'コンクリート' },
   sute: { name: '捨てコン', fill: '#cfd5db', c3: '#b9c0c8', unit: '捨てコン' },
   sai: { name: '砕石', fill: '#f1e6cc', c3: '#d2bf95', unit: '砕石' },
+  // 躯体（11/16 追加）。wood＝木材（寸法を選べる）、ins＝断熱材（厚み÷熱伝導率＝熱抵抗）
+  wood: { name: '木材', fill: '#ecd2a8', c3: '#d9b47c', unit: '木材', line: '#a07a45', wood: true },
+  ply: { name: '合板・構造用面材', fill: '#dcbf8f', c3: '#c9a46a', unit: '合板', line: '#9a7440' },
+  pb: { name: '石膏ボード', fill: '#f4f4f1', c3: '#e9e9e4', unit: '石膏ボード', line: '#9aa0a6' },
+  gw: { name: 'グラスウール', fill: '#f7e9a6', c3: '#f0d873', unit: '断熱材', line: '#c9a92a', ins: 'gw' },
+  blow: { name: 'ブローイング', fill: '#f3e4bf', c3: '#e6cf92', unit: '断熱材', line: '#b99a4a', ins: 'blow' },
+  xps: { name: 'スタイロ（押出法ポリスチレン）', fill: '#bfe0f5', c3: '#8cc7ec', unit: '断熱材', line: '#3f8fc4', ins: 'xps' },
 };
+// 木材の寸法（幅×せい）。2×4・2×6 と、よく使う 45×95・45×120
+const WOOD_SIZES = { '2×4（38×89）': [38, 89], '2×6（38×140）': [38, 140], '45×95': [45, 95], '45×120': [45, 120] };
+// 断熱材の熱伝導率 λ（W/mK）の目安。★実際の値はカタログで確認して直す
+const GW_DENS = [10, 16, 20, 24, 32];   // グラスウールは密度（kg/m³）で選ぶ
+const GW_LAM = { 10: 0.050, 16: 0.045, 20: 0.042, 24: 0.038, 32: 0.036 };   // 通常品の目安
+const INS_LAM = { blow: 0.040, xps: 0.028 };   // ブローイング・スタイロ（3種b）の最初の値
+// 厚み（短い辺。四角でないときは外形の短い辺）・λ・熱抵抗 R（m²K/W）
+function insInfo(it) {
+  const M = MATS[it.mat]; if (!M || !M.ins) return null;
+  const zs = it.pts.map(p => p[0]), ys = it.pts.map(p => p[1]);
+  const t = rr(Math.min(Math.max(...zs) - Math.min(...zs), Math.max(...ys) - Math.min(...ys)));
+  const lam = it.lam || (M.ins === 'gw' ? GW_LAM[it.dens || 16] : INS_LAM[M.ins]);
+  return { t, lam, R: Math.round(t / 1000 / lam * 100) / 100 };
+}
+// 線の種類：GL と、シート（気密ラインなど）。シートは薄いので線で描く
+const LINES = {
+  gl: { name: 'GL（地面の線）', color: '#7a5a2e', unit: 'GL' },
+  kimitsu: { name: '気密シート（気密ライン）', color: '#d32f2f', unit: 'シート' },
+  toshitsu: { name: '透湿防水シート', color: '#1565c0', unit: 'シート' },
+  boshitsu: { name: '防湿シート', color: '#6a1b9a', unit: 'シート' },
+};
+const lineOf = it => LINES[it.ln] || LINES.gl;
 const GL_COLOR = '#7a5a2e';
-const itemColor = it => it.k === 'con' ? (it.mat === 'sai' ? '#c9b07a' : it.mat === 'sute' ? '#a9b2bc' : '#8a96a3') : it.k === 'gl' ? GL_COLOR : REBAR_ROLES[it.role] || '#5a6570';
+const itemColor = it => it.k === 'con' ? (it.mat === 'sai' ? '#c9b07a' : it.mat === 'sute' ? '#a9b2bc' : (MATS[it.mat] && MATS[it.mat].line) || '#8a96a3') : it.k === 'gl' ? lineOf(it).color : REBAR_ROLES[it.role] || '#5a6570';
 const barCount = (it, D) => Math.max(1, Math.floor(Math.max(0, D - 2 * it.start) / it.pitch + 1e-6) + 1);
 function validSec(d) {
   const o = d && typeof d === 'object' ? d : {};
@@ -194,8 +223,13 @@ function validSec(d) {
   const items = (Array.isArray(o.items) ? o.items : []).map(it => {
     if (!it || !['con', 'dot', 'bar', 'gl'].includes(it.k)) return null;
     const base = { k: it.k, name: String(it.name || '').slice(0, 40), unit: String(it.unit || '').slice(0, 30) };
-    if (it.k === 'con') { const p = pts(it.pts).map(q => [q[0], q[1]]); return p.length >= 3 ? { ...base, mat: MATS[it.mat] ? it.mat : 'con', pts: p } : null; }
-    if (it.k === 'gl') { const p = pts(it.pts); return p.length >= 2 ? { ...base, pts: p } : null; }
+    if (it.k === 'con') {
+      const p = pts(it.pts).map(q => [q[0], q[1]]); if (p.length < 3) return null;
+      const mat = MATS[it.mat] ? it.mat : 'con', o2 = { ...base, mat, pts: p };
+      if (MATS[mat].ins) { const l = num(it.lam, 0); if (l > 0) o2.lam = l; if (MATS[mat].ins === 'gw') o2.dens = GW_DENS.includes(num(it.dens, 16)) ? num(it.dens, 16) : 16; }
+      return o2;
+    }
+    if (it.k === 'gl') { const p = pts(it.pts); return p.length >= 2 ? { ...base, ...(LINES[it.ln] && it.ln !== 'gl' ? { ln: it.ln } : {}), pts: p } : null; }
     const rb = { ...base, rk: REBAR_DIA[it.rk] ? it.rk : 'D13', role: REBAR_ROLES[it.role] ? it.role : 'その他' };
     if (it.k === 'dot') {   // z2,y2＝終わりの端（斜めに通る鉄筋）
       const z = num(it.z, 0), y = num(it.y, 0), z2 = num(it.z2, null), y2 = num(it.y2, null);
@@ -368,7 +402,7 @@ $('#io-load').onclick = () => {
 
 /* ===== 編集 ===== */
 const E = { x: null, def: null, tool: 'sel', sel: -1, selV: null, grid: 10, V: { cx: 0, cy: 0, s: 0.3 }, draft: [], hist: [], fut: [], meas: [], open: false, step: 10, hintUntil: 0,
-  next: { rk: 'D13', role: '主筋', pitch: 250, start: 125 } };
+  next: { rk: 'D13', role: '主筋', pitch: 250, start: 125, mat: 'con', size: '', ln: 'gl' } };
 const svg = $('#svg');
 const W = () => svg.clientWidth, H = () => svg.clientHeight;
 const sx = z => E.V.cx + z * E.V.s, sy = y => E.V.cy - y * E.V.s;
@@ -405,11 +439,11 @@ window.addEventListener('resize', () => { if (!$('#ed').hidden) render(); });
 /* --- 道具 --- */
 const HINT = {
   sel: 'パーツをタップ → □（点）をタップ → 右下の矢印で動かす（ドラッグでも可）。何もない所をなぞる＝画面を動かす、2本指＝拡大・縮小',
-  rect: '四角：角を2か所タップ（目盛に合います）',
+  rect: '四角：角を2か所タップ（目盛に合います）。材料と寸法は下の欄（▲）で。寸法を選ぶと1回のタップで置けます',
   poly: '多角形：角を順にタップ → 最初の点をタップか「完了」',
   dot: '通し筋：置く所をタップ（径・役割は下の欄で）',
   bar: '断面の筋：折れ曲がる点を順にタップ →「完了」',
-  gl: 'GL：線の点を順にタップ →「完了」',
+  gl: '線（GL・気密シートなど）：点を順にタップ →「完了」。種類は下の欄（▲）で',
   meas: '測る：2点をタップ（点・線に吸い付きます。2点目を線の上にすると直角の足＝厚さ）',
 };
 function setTool(t) {
@@ -451,7 +485,7 @@ function render() {
   });
   E.def.items.forEach((it, i) => {
     const on = i === E.sel, col = itemColor(it), wpx = Math.max(2, dia(it) * E.V.s);
-    if (it.k === 'gl') out.push(`<polyline points="${P(it.pts)}" fill="none" stroke="${on ? '#e0a800' : GL_COLOR}" stroke-width="${on ? 4 : 2.5}"/>`);
+    if (it.k === 'gl') out.push(`<polyline points="${P(it.pts)}" fill="none" stroke="${on ? '#e0a800' : lineOf(it).color}" stroke-width="${on ? 4 : 2.5}"${it.ln && it.ln !== 'kimitsu' ? ' stroke-dasharray="8 3"' : ''}/>`);
     else if (it.k === 'bar') {
       if (on) out.push(`<polyline points="${P(it.pts)}" fill="none" stroke="#ffd84a" stroke-width="${wpx + 10}" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>`);
       out.push(`<polyline points="${P(it.pts)}" fill="none" stroke="${col}" stroke-width="${wpx}" stroke-linecap="round" stroke-linejoin="round"/>`);
@@ -538,11 +572,29 @@ function renderProps() {
     h += `<div class="g2"><label class="f">径<select data-n="rk">${opts(['D10', 'D13', 'D16', 'D19'], n.rk)}</select></label><label class="f">役割（色）<select data-n="role">${opts(Object.keys(REBAR_ROLES), n.role)}</select></label></div>`;
     if (E.tool === 'bar') h += `<div class="g2"><label class="f">ピッチ @<input data-n="pitch" type="number" inputmode="decimal" value="${n.pitch}"></label><label class="f">最初の位置（端から）<input data-n="start" type="number" inputmode="decimal" value="${n.start}"></label></div>`;
   }
+  if (E.tool === 'rect' || E.tool === 'poly') {
+    const n = E.next;
+    h += `<label class="f">材料<select data-n="mat">${Object.entries(MATS).map(([k, m]) => `<option value="${k}"${k === n.mat ? ' selected' : ''}>${m.name}</option>`).join('')}</select></label>`;
+    if (E.tool === 'rect') h += `<label class="f">寸法（選ぶと1回のタップで置ける。タップした所が左下）<select data-n="size"><option value="">2点で描く</option>${Object.keys(WOOD_SIZES).map(k => `<option value="${k}"${k === n.size ? ' selected' : ''}>${k}（縦向き）</option>`).join('')}${Object.keys(WOOD_SIZES).map(k => `<option value="${k}|横"${k + '|横' === n.size ? ' selected' : ''}>${k}（横向き）</option>`).join('')}</select></label>`;
+  }
+  if (E.tool === 'gl') h += `<label class="f">線の種類<select data-n="ln">${Object.entries(LINES).map(([k, m]) => `<option value="${k}"${k === E.next.ln ? ' selected' : ''}>${m.name}</option>`).join('')}</select></label>`;
   if (it) {
-    const KN = it.k === 'con' ? (MATS[it.mat] || MATS.con).name : KIND_NAME[it.k];
+    const KN = it.k === 'con' ? (MATS[it.mat] || MATS.con).name : it.k === 'gl' ? lineOf(it).name : KIND_NAME[it.k];
     h += `<div class="row" style="justify-content:space-between"><b>${KN}${E.selV != null ? `　点 ${E.selV + 1}` : ''}</b><span class="row"><button class="btn" data-act="dup">複製</button><button class="btn dan" data-act="del">削除</button></span></div>`;
     h += `<label class="f">名前<input data-k="name" value="${esc(it.name)}" maxlength="40"></label>`;
     if (it.k === 'con') h += `<label class="f">材料（かぶりはコンクリートだけで測ります）<select data-k="mat">${Object.entries(MATS).map(([k, m]) => `<option value="${k}"${k === (it.mat || 'con') ? ' selected' : ''}>${m.name}</option>`).join('')}</select></label>`;
+    if (it.k === 'gl') h += `<label class="f">線の種類<select data-k="ln">${Object.entries(LINES).map(([k, m]) => `<option value="${k}"${k === (it.ln || 'gl') ? ' selected' : ''}>${m.name}</option>`).join('')}</select></label>`;
+    const bx = it.k === 'con' ? rectOf(it) : null;
+    if (bx) {
+      h += `<div class="g2"><label class="f">幅（横）<input data-k="w" type="number" inputmode="decimal" value="${bx.w}"></label><label class="f">高さ（縦）<input data-k="h" type="number" inputmode="decimal" value="${bx.h}"></label></div>`;
+      if (MATS[it.mat] && MATS[it.mat].wood) h += `<div class="row">${Object.keys(WOOD_SIZES).map(k => `<button class="btn" data-act="wsize" data-v="${k}">${k.replace(/（.*）/, '')}</button>`).join('')}<button class="btn" data-act="swap">縦横入れ替え</button></div>`;
+    }
+    const ins = it.k === 'con' ? insInfo(it) : null;
+    if (ins) {
+      const M = MATS[it.mat];
+      h += `<div class="g2">${M.ins === 'gw' ? `<label class="f">密度（kg/m³）<select data-k="dens">${GW_DENS.map(v => `<option value="${v}"${v === (it.dens || 16) ? ' selected' : ''}>${v}K</option>`).join('')}</select></label>` : ''}<label class="f">熱伝導率 λ（W/mK）<input data-k="lam" type="number" inputmode="decimal" step="0.001" value="${ins.lam}"></label></div>`;
+      h += `<div class="note">厚み ${ins.t} ÷ λ ${ins.lam} ＝ <b>熱抵抗 R ${ins.R}</b> m²K/W<br><span class="muted">λ の最初の値は目安です。カタログで確認して直してください</span></div>`;
+    }
     if (it.k === 'dot' || it.k === 'bar') {
       const cv = cover(it);
       h += `<div class="g2"><label class="f">径<select data-k="rk">${opts(['D10', 'D13', 'D16', 'D19'], it.rk)}</select></label><label class="f">役割（色）<select data-k="role">${opts(Object.keys(REBAR_ROLES), it.role)}</select></label></div>`;
@@ -573,8 +625,10 @@ function renderSum() {
     t = `${E.draft.length} 点`;
     b = `<button class="btn pri" data-act="done">完了</button><button class="btn" data-act="undopt">1点もどす</button><button class="btn" data-act="cancel">やめる</button>`;
   } else if (it) {
-    const KN = it.k === 'con' ? (MATS[it.mat] || MATS.con).name : KIND_NAME[it.k];
+    const KN = it.k === 'con' ? (MATS[it.mat] || MATS.con).name : it.k === 'gl' ? lineOf(it).name : KIND_NAME[it.k];
     t = `<b>${esc(it.name || KN)}</b>`;
+    const ins = it.k === 'con' ? insInfo(it) : null, bx = it.k === 'con' && !ins ? rectOf(it) : null;
+    if (ins) t += `　厚${ins.t}　R ${ins.R}`; else if (bx && it.mat !== 'con') t += `　${bx.w}×${bx.h}`;
     if (it.k === 'dot' || it.k === 'bar') { const cv = cover(it); t += `　${it.rk}${cv ? `　かぶり ${rr(cv.d)}` : ''}`; }
     if (E.selV != null) t += `　点 ${E.selV + 1}`;
   } else if (E.tool === 'sel') t = `${esc(d.name)}・${d.items.length} 個`;
@@ -583,24 +637,31 @@ function renderSum() {
 }
 $('#props').addEventListener('change', e => {
   const el = e.target, d = E.def;
-  if (el.dataset.n) { const k = el.dataset.n; E.next[k] = ['pitch', 'start'].includes(k) ? Math.max(0, +el.value || E.next[k]) : el.value; return; }
+  if (el.dataset.n) { const k = el.dataset.n; E.next[k] = ['pitch', 'start'].includes(k) ? Math.max(0, +el.value || E.next[k]) : el.value; if (k === 'size' && el.value && !MATS[E.next.mat].wood) { E.next.mat = 'wood'; renderProps(); } return; }
   if (el.dataset.s) { const k = el.dataset.s; mutate(() => { d[k] = ['depth', 'edge'].includes(k) ? +el.value : el.value; }); return; }
   const k = el.dataset.k, it = d.items[E.sel]; if (!k || !it) return;
   mutate(() => {
     if (k === 'pts') { const p = el.value.split(/\n+/).map(l => l.split(/[,\s、]+/).filter(Boolean).map(Number)).filter(a => a.length >= 2 && a.every(isFinite)); if (p.length >= (it.k === 'con' ? 3 : 2)) it.pts = p; else toast('点が足りません'); }
     else if (['z', 'y', 'pitch', 'start'].includes(k)) { if (isFinite(+el.value) && el.value !== '') it[k] = +el.value; }
+    else if (k === 'w' || k === 'h') { const v = +el.value, b = rectOf(it); if (b && v > 0) setRect(it, b.z, b.y, k === 'w' ? v : b.w, k === 'h' ? v : b.h); }
+    else if (k === 'dens') { it.dens = +el.value; delete it.lam; }   // 密度を変えたら λ は目安に戻す
+    else if (k === 'lam') { const v = +el.value; if (v > 0) it.lam = v; else delete it.lam; }
+    else if (k === 'ln') { const old = lineOf(it); if (el.value !== 'gl') it.ln = el.value; else delete it.ln; if (!it.name || it.name === old.name || it.name === 'GL') it.name = lineOf(it).name; }
+    else if (k === 'mat') { const old = MATS[it.mat] || MATS.con; if (!it.name || it.name === old.name) it.name = (MATS[el.value] || MATS.con).name; it.mat = el.value; delete it.lam; delete it.dens; }
     else it[k] = el.value;
   });
 });
 function onAct(e) {
-  const b = e.target.closest('[data-act]'); if (!b) return;
-  const a = b.dataset.act, d = E.def, it = d.items[E.sel];
+  const b0 = e.target.closest('[data-act]'); if (!b0) return;
+  const a = b0.dataset.act, d = E.def, it = d.items[E.sel];
   if (a === 'done') finishDraft();
   else if (a === 'undopt') { E.draft.pop(); render(); }
   else if (a === 'cancel') { E.draft = []; render(); }
   else if (a === 'del' && it) { mutate(() => { d.items.splice(E.sel, 1); }); E.sel = -1; E.selV = null; render(); }
   else if (a === 'dup' && it) { mutate(() => { const c = JSON.parse(JSON.stringify(it)); if (c.k === 'dot') { c.z += 50; } else c.pts = c.pts.map(p => [p[0] + 50, p[1], ...p.slice(2)]); d.items.push(c); }); E.sel = d.items.length - 1; E.selV = null; render(); }
   else if (a === 'addpt' && it && E.selV != null) { mutate(() => { const p = it.pts, j = E.selV, q = p[(j + 1) % p.length]; const m = it.k !== 'con' && j === p.length - 1 ? [p[j][0] + 50, p[j][1]] : [rr((p[j][0] + q[0]) / 2), rr((p[j][1] + q[1]) / 2)]; p.splice(j + 1, 0, m); }); E.selV++; render(); }
+  else if (a === 'wsize' && it) { const r = rectOf(it), [w, h] = WOOD_SIZES[b0.dataset.v]; if (r) { const lay = r.w > r.h; mutate(() => setRect(it, r.z, r.y, lay ? h : w, lay ? w : h)); } }
+  else if (a === 'swap' && it) { const r = rectOf(it); if (r) mutate(() => setRect(it, r.z, r.y, r.h, r.w)); }
   else if (a === 'delpt' && it && E.selV != null) { if (it.pts.length <= (it.k === 'con' ? 3 : 2)) { toast('これ以上は消せません'); return; } mutate(() => { it.pts.splice(E.selV, 1); }); E.selV = null; render(); }
 }
 $('#props').addEventListener('click', onAct);
@@ -611,18 +672,28 @@ $$('[data-nv]').forEach(b => b.onclick = () => {
   const [dz, dy] = b.dataset.nv.split(',').map(Number), st = E.step;
   mutate(() => moveItem(it, E.selV, dz * st, dy * st));
 });
+// 軸にそろった四角なら左下の位置と幅・高さ
+function rectOf(it) {
+  if (it.k !== 'con' || it.pts.length !== 4) return null;
+  const zs = [...new Set(it.pts.map(p => p[0]))], ys = [...new Set(it.pts.map(p => p[1]))];
+  if (zs.length !== 2 || ys.length !== 2) return null;
+  const z = Math.min(...zs), y = Math.min(...ys);
+  return { z, y, w: rr(Math.max(...zs) - z), h: rr(Math.max(...ys) - y) };
+}
+function setRect(it, z, y, w, h) { it.pts = [[z, y], [rr(z + w), y], [rr(z + w), rr(y + h)], [z, rr(y + h)]]; }
 function moveItem(it, v, dz, dy) {
   const mv = q => { q[0] = rr(q[0] + dz); q[1] = rr(q[1] + dy); };
   if (it.k === 'dot') { it.z = rr(it.z + dz); it.y = rr(it.y + dy); if (it.z2 != null) { it.z2 = rr(it.z2 + dz); it.y2 = rr(it.y2 + dy); } return; }
   if (v != null && it.pts[v]) mv(it.pts[v]); else it.pts.forEach(mv);
 }
+const newCon = pts => ({ k: 'con', mat: E.next.mat, name: E.next.mat === 'con' ? '' : MATS[E.next.mat].name, pts });
 function finishDraft() {
   const d = E.draft, t = E.tool;
   if (t === 'poly' && d.length < 3) { toast('3点以上タップしてください'); return; }
   if ((t === 'bar' || t === 'gl') && d.length < 2) { toast('2点以上タップしてください'); return; }
   mutate(() => {
-    if (t === 'poly') E.def.items.push({ k: 'con', mat: 'con', name: '', pts: d.slice() });
-    else if (t === 'gl') E.def.items.push({ k: 'gl', name: 'GL', pts: d.slice() });
+    if (t === 'poly') E.def.items.push(newCon(d.slice()));
+    else if (t === 'gl') E.def.items.push({ k: 'gl', name: LINES[E.next.ln].name, ...(E.next.ln !== 'gl' ? { ln: E.next.ln } : {}), pts: d.slice() });
     else if (t === 'bar') E.def.items.push({ k: 'bar', name: '', rk: E.next.rk, role: E.next.role, pitch: E.next.pitch, start: E.next.start, pts: d.slice() });
   });
   E.draft = []; E.tool = 'sel'; E.sel = E.def.items.length - 1; E.selV = null;
@@ -740,11 +811,16 @@ function onTap(px, py) {
     mutate(() => E.def.items.push({ k: 'dot', name: '', rk: E.next.rk, role: E.next.role, z: q[0], y: q[1] }));
     E.sel = E.def.items.length - 1; E.selV = null; render(); return;
   }
+  if (t === 'rect' && E.next.size) {
+    const [key, dir] = E.next.size.split('|'), [w, h] = WOOD_SIZES[key], W2 = dir ? h : w, H2 = dir ? w : h;
+    mutate(() => E.def.items.push(newCon([[q[0], q[1]], [rr(q[0] + W2), q[1]], [rr(q[0] + W2), rr(q[1] + H2)], [q[0], rr(q[1] + H2)]])));
+    E.sel = E.def.items.length - 1; E.selV = null; render(); return;   // 続けて置けるように道具はそのまま
+  }
   if (t === 'rect') {
     if (!E.draft.length) { E.draft = [q]; render(); return; }
     const a = E.draft[0]; if (a[0] === q[0] || a[1] === q[1]) { toast('幅か高さが 0 です'); return; }
     E.draft = [];
-    mutate(() => E.def.items.push({ k: 'con', mat: 'con', name: '', pts: [[a[0], a[1]], [q[0], a[1]], [q[0], q[1]], [a[0], q[1]]] }));
+    mutate(() => E.def.items.push(newCon([[a[0], a[1]], [q[0], a[1]], [q[0], q[1]], [a[0], q[1]]])));
     E.sel = E.def.items.length - 1; E.tool = 'sel'; $$('#tools [data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === 'sel')); render(); return;
   }
   // 多角形・断面の筋・GL：点を足す（多角形は最初の点をタップで閉じる）
