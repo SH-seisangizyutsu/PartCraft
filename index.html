@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>断面づくり</title>
-<!-- 版：2026-11-14a -->
+<!-- 版：2026-11-16a -->
 <style>
 :root{--line:#d5dbe2;--ink:#1b2430;--mut:#667381;--acc:#0b5fae;--sel:#e0a800;--bg:#f4f6f8;--card:#fff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -49,14 +49,34 @@ input,select,textarea{font-size:16px}
 #svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none}
 #hud{position:absolute;left:8px;top:6px;right:8px;font-size:12px;color:var(--mut);pointer-events:none;display:flex;justify-content:space-between;gap:8px}
 #hud span{background:#ffffffd9;border-radius:6px;padding:1px 6px}
-#hint{position:absolute;left:8px;right:8px;bottom:6px;font-size:12px;color:#3b2f00;background:#fff3b0e6;border:1px solid var(--sel);border-radius:8px;padding:3px 8px;pointer-events:none}
-#sheet{background:#fff;border-top:1px solid var(--line);max-height:46vh;overflow:auto;padding:8px 10px 10px;display:flex;flex-direction:column;gap:8px}
-#sheet.mini #props{display:none}
-.pad{display:grid;grid-template-columns:repeat(3,48px) 1fr;grid-template-rows:repeat(2,40px);gap:4px;align-items:center}
-.pad .btn{padding:0;min-height:40px;font-size:18px}
-.pad .side{grid-column:4;grid-row:1/3;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);padding-left:6px}
+#hint{position:absolute;left:8px;right:8px;top:30px;font-size:12px;color:#3b2f00;background:#fff3b0e6;border:1px solid var(--sel);border-radius:8px;padding:3px 8px;pointer-events:none}
+/* 矢印：絵の右下に重ねる（パーツを選んだときだけ） */
+#nav{position:absolute;right:calc(env(safe-area-inset-right) + 8px);bottom:8px;display:grid;grid-template-columns:repeat(3,44px);grid-template-rows:repeat(2,44px);gap:4px;padding:4px;background:#ffffffb3;border-radius:12px}
+#nav .btn{padding:0;min-height:44px;font-size:18px;background:#ffffffe6}
+#nav #e-step{font-size:13px;color:var(--mut)}
+/* 下の欄：ふだんは1行、▲で全部 */
+#sheet{background:#fff;border-top:1px solid var(--line);display:flex;flex-direction:column}
+#sum{display:flex;align-items:center;gap:6px;padding:4px 8px;min-height:44px}
+#sum-t{flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sum-b{display:flex;gap:4px}
+#sum .btn{padding:4px 10px;min-height:36px;font-size:14px}
+#props{max-height:48vh;overflow:auto;padding:4px 10px 10px;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line)}
+#sheet:not(.open) #props{display:none}
 #tools{display:flex;gap:4px;overflow-x:auto;padding:6px 8px calc(env(safe-area-inset-bottom) + 6px);background:#fff;border-top:1px solid var(--line)}
 #tools .btn{padding:6px 10px;min-height:38px;font-size:14px}
+/* 横向き：← 左の列に道具と欄、→ 右に絵 */
+@media (orientation:landscape) and (max-height:500px){
+  #ed{display:grid;grid-template-columns:calc(env(safe-area-inset-left) + 232px) 1fr;grid-template-rows:auto auto 1fr;grid-template-areas:"top stage" "tools stage" "sheet stage"}
+  #top{grid-area:top;flex-wrap:wrap;gap:4px;padding:calc(env(safe-area-inset-top) + 4px) 6px 4px calc(env(safe-area-inset-left) + 6px);border-right:1px solid var(--line)}
+  #top .ttl{display:none}
+  #top .btn{padding:4px 7px;min-height:34px;font-size:14px}
+  #stage{grid-area:stage}
+  #tools{grid-area:tools;display:grid;grid-template-columns:repeat(3,1fr);overflow:visible;padding:4px 6px 4px calc(env(safe-area-inset-left) + 6px);border-right:1px solid var(--line)}
+  #tools .btn{padding:2px 4px;min-height:34px;font-size:13px}
+  #sheet{grid-area:sheet;overflow:auto;min-height:0;border-right:1px solid var(--line);padding:0 0 env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  #sheet #props,#sheet:not(.open) #props{display:flex;max-height:none;overflow:visible}
+  #e-open{display:none}
+}
 .modal{position:fixed;inset:0;background:#0006;display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .modal .box{background:#fff;width:100%;max-width:640px;border-radius:14px 14px 0 0;padding:14px 16px calc(env(safe-area-inset-bottom) + 14px);max-height:88vh;overflow:auto;display:flex;flex-direction:column;gap:10px}
 .modal h2{margin:0;font-size:17px}
@@ -92,16 +112,13 @@ input,select,textarea{font-size:16px}
     <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="hud"><span id="h-pos">z 0　y 0</span><span id="h-grid"></span></div>
     <div id="hint" hidden></div>
-  </div>
-  <div id="sheet">
-    <div class="pad" id="pad">
-      <span></span><button class="btn" data-nv="0,1">↑</button><span></span>
-      <div class="side">
-        <label class="f">1回の移動<select id="e-step"><option>1</option><option>5</option><option selected>10</option><option>25</option><option>50</option></select></label>
-        <button class="btn" id="e-mini" style="font-size:13px;min-height:32px">欄をたたむ</button>
-      </div>
+    <div id="nav" hidden>
+      <button class="btn" id="e-step" aria-label="1回の移動">10</button><button class="btn" data-nv="0,1">↑</button><span></span>
       <button class="btn" data-nv="-1,0">←</button><button class="btn" data-nv="0,-1">↓</button><button class="btn" data-nv="1,0">→</button>
     </div>
+  </div>
+  <div id="sheet">
+    <div id="sum"><span id="sum-t"></span><span id="sum-b"></span><button class="btn" id="e-open" aria-label="欄をひらく">▲</button></div>
     <div id="props"></div>
   </div>
   <div id="tools">
@@ -350,7 +367,7 @@ $('#io-load').onclick = () => {
 };
 
 /* ===== 編集 ===== */
-const E = { x: null, def: null, tool: 'sel', sel: -1, selV: null, grid: 10, V: { cx: 0, cy: 0, s: 0.3 }, draft: [], hist: [], fut: [], meas: [], mini: false,
+const E = { x: null, def: null, tool: 'sel', sel: -1, selV: null, grid: 10, V: { cx: 0, cy: 0, s: 0.3 }, draft: [], hist: [], fut: [], meas: [], open: false, step: 10, hintUntil: 0,
   next: { rk: 'D13', role: '主筋', pitch: 250, start: 125 } };
 const svg = $('#svg');
 const W = () => svg.clientWidth, H = () => svg.clientHeight;
@@ -387,7 +404,7 @@ window.addEventListener('resize', () => { if (!$('#ed').hidden) render(); });
 
 /* --- 道具 --- */
 const HINT = {
-  sel: 'パーツをタップ → □（点）をタップ → 下の矢印で動かす（ドラッグでも可）。何もない所をなぞる＝画面を動かす、2本指＝拡大・縮小',
+  sel: 'パーツをタップ → □（点）をタップ → 右下の矢印で動かす（ドラッグでも可）。何もない所をなぞる＝画面を動かす、2本指＝拡大・縮小',
   rect: '四角：角を2か所タップ（目盛に合います）',
   poly: '多角形：角を順にタップ → 最初の点をタップか「完了」',
   dot: '通し筋：置く所をタップ（径・役割は下の欄で）',
@@ -396,6 +413,7 @@ const HINT = {
   meas: '測る：2点をタップ（点・線に吸い付きます。2点目を線の上にすると直角の足＝厚さ）',
 };
 function setTool(t) {
+  E.hintUntil = Date.now() + 5000; clearTimeout(E.hintT); E.hintT = setTimeout(() => { $('#hint').hidden = true; }, 5000);
   E.tool = t; E.draft = []; if (t !== 'meas') E.meas = [];
   if (t !== 'sel') { E.sel = -1; E.selV = null; }
   $$('#tools [data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
@@ -404,7 +422,13 @@ function setTool(t) {
 $$('#tools [data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 const GRIDS = [1, 5, 10, 25, 50];
 $('#e-grid').onclick = () => { E.grid = GRIDS[(GRIDS.indexOf(E.grid) + 1) % GRIDS.length]; $('#e-grid').textContent = `目盛 ${E.grid}`; render(); };
-$('#e-mini').onclick = () => { E.mini = !E.mini; $('#sheet').classList.toggle('mini', E.mini); $('#e-mini').textContent = E.mini ? '欄をひらく' : '欄をたたむ'; };
+// 下の欄：▲で全部ひらく／▼で1行にもどす（横向きではいつも全部）
+$('#e-open').onclick = () => { E.open = !E.open; $('#sheet').classList.toggle('open', E.open); $('#e-open').textContent = E.open ? '▼' : '▲'; render(); };
+// 1回の移動：押すたびに 1→5→10→25→50
+const STEPS = [1, 5, 10, 25, 50];
+$('#e-step').onclick = () => { E.step = STEPS[(STEPS.indexOf(E.step) + 1) % STEPS.length]; $('#e-step').textContent = E.step; toast(`矢印1回で ${E.step} mm`); };
+// 向きを変えたら全体が入るように合わせ直す
+matchMedia('(orientation: landscape)').addEventListener('change', () => { if (!$('#ed').hidden) setTimeout(fit, 200); });
 
 /* --- 描く --- */
 function render() {
@@ -476,7 +500,7 @@ function render() {
   $('#e-ttl').textContent = E.def.name;
   $('#h-grid').textContent = `目盛 ${E.grid}（線 ${g}）`;
   $('#e-undo').disabled = !E.hist.length; $('#e-redo').disabled = !E.fut.length;
-  const hint = $('#hint'); hint.hidden = false; hint.textContent = HINT[E.tool];
+  const hint = $('#hint'); hint.textContent = HINT[E.tool]; hint.hidden = Date.now() > E.hintUntil;
   renderProps();
 }
 
@@ -508,7 +532,7 @@ function renderProps() {
   const box = $('#props'); if (box.contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   const d = E.def, it = d.items[E.sel];
   let h = '';
-  if (['poly', 'bar', 'gl'].includes(E.tool) && E.draft.length) h += `<div class="row"><button class="btn pri" data-act="done">完了（${E.draft.length} 点）</button><button class="btn" data-act="undopt">1点もどす</button><button class="btn" data-act="cancel">やめる</button></div>`;
+  // 描きかけの「完了」などは1行の欄（renderSum）に出す
   if (E.tool === 'dot' || E.tool === 'bar') {
     const n = E.next;
     h += `<div class="g2"><label class="f">径<select data-n="rk">${opts(['D10', 'D13', 'D16', 'D19'], n.rk)}</select></label><label class="f">役割（色）<select data-n="role">${opts(Object.keys(REBAR_ROLES), n.role)}</select></label></div>`;
@@ -539,7 +563,23 @@ function renderProps() {
     h += `<p class="muted" style="margin:0">${d.items.length} 個。パーツをタップすると、ここで名前・径・座標を直せます。</p>`;
   }
   box.innerHTML = h;
-  $('#pad').style.opacity = it ? 1 : .45;
+  $('#nav').hidden = !it;
+  renderSum();
+}
+// 1行の欄：選んだパーツの要点・描きかけの操作・断面の名前
+function renderSum() {
+  const d = E.def, it = d.items[E.sel]; let t = '', b = '';
+  if (['poly', 'bar', 'gl'].includes(E.tool) && E.draft.length) {
+    t = `${E.draft.length} 点`;
+    b = `<button class="btn pri" data-act="done">完了</button><button class="btn" data-act="undopt">1点もどす</button><button class="btn" data-act="cancel">やめる</button>`;
+  } else if (it) {
+    const KN = it.k === 'con' ? (MATS[it.mat] || MATS.con).name : KIND_NAME[it.k];
+    t = `<b>${esc(it.name || KN)}</b>`;
+    if (it.k === 'dot' || it.k === 'bar') { const cv = cover(it); t += `　${it.rk}${cv ? `　かぶり ${rr(cv.d)}` : ''}`; }
+    if (E.selV != null) t += `　点 ${E.selV + 1}`;
+  } else if (E.tool === 'sel') t = `${esc(d.name)}・${d.items.length} 個`;
+  else t = $(`#tools [data-tool="${E.tool}"]`).textContent;
+  $('#sum-t').innerHTML = t; $('#sum-b').innerHTML = b;
 }
 $('#props').addEventListener('change', e => {
   const el = e.target, d = E.def;
@@ -552,7 +592,7 @@ $('#props').addEventListener('change', e => {
     else it[k] = el.value;
   });
 });
-$('#props').addEventListener('click', e => {
+function onAct(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const a = b.dataset.act, d = E.def, it = d.items[E.sel];
   if (a === 'done') finishDraft();
@@ -562,11 +602,13 @@ $('#props').addEventListener('click', e => {
   else if (a === 'dup' && it) { mutate(() => { const c = JSON.parse(JSON.stringify(it)); if (c.k === 'dot') { c.z += 50; } else c.pts = c.pts.map(p => [p[0] + 50, p[1], ...p.slice(2)]); d.items.push(c); }); E.sel = d.items.length - 1; E.selV = null; render(); }
   else if (a === 'addpt' && it && E.selV != null) { mutate(() => { const p = it.pts, j = E.selV, q = p[(j + 1) % p.length]; const m = it.k !== 'con' && j === p.length - 1 ? [p[j][0] + 50, p[j][1]] : [rr((p[j][0] + q[0]) / 2), rr((p[j][1] + q[1]) / 2)]; p.splice(j + 1, 0, m); }); E.selV++; render(); }
   else if (a === 'delpt' && it && E.selV != null) { if (it.pts.length <= (it.k === 'con' ? 3 : 2)) { toast('これ以上は消せません'); return; } mutate(() => { it.pts.splice(E.selV, 1); }); E.selV = null; render(); }
-});
+}
+$('#props').addEventListener('click', onAct);
+$('#sum-b').addEventListener('click', onAct);
 // 矢印：選んだ点（なければパーツごと）を 1回の移動 だけ動かす
 $$('[data-nv]').forEach(b => b.onclick = () => {
   const it = E.def.items[E.sel]; if (!it) { toast('先にパーツをタップしてください'); return; }
-  const [dz, dy] = b.dataset.nv.split(',').map(Number), st = +$('#e-step').value;
+  const [dz, dy] = b.dataset.nv.split(',').map(Number), st = E.step;
   mutate(() => moveItem(it, E.selV, dz * st, dy * st));
 });
 function moveItem(it, v, dz, dy) {
