@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>断面づくり</title>
-<!-- 版：2026-11-16b -->
+<!-- 版：2026-11-17a -->
 <style>
 :root{--line:#d5dbe2;--ink:#1b2430;--mut:#667381;--acc:#0b5fae;--sel:#e0a800;--bg:#f4f6f8;--card:#fff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -142,6 +142,8 @@ input,select,textarea{font-size:16px}
     <option value="beta">べた基礎・外周部（11/12の形）</option>
     <option value="betain">べた基礎・内部の立ち上がり</option>
     <option value="blank">白紙</option>
+    <option value="wall24">上から：外壁 2×4（スタッド@455）</option>
+    <option value="blanktop">上から：白紙</option>
   </select></label>
   <div class="row"><button class="btn pri" id="n-ok">作る</button><button class="btn" data-close>やめる</button></div>
 </div></div>
@@ -227,6 +229,8 @@ function validSec(d) {
       const p = pts(it.pts).map(q => [q[0], q[1]]); if (p.length < 3) return null;
       const mat = MATS[it.mat] ? it.mat : 'con', o2 = { ...base, mat, pts: p };
       if (MATS[mat].ins) { const l = num(it.lam, 0); if (l > 0) o2.lam = l; if (MATS[mat].ins === 'gw') o2.dens = GW_DENS.includes(num(it.dens, 16)) ? num(it.dens, 16) : 16; }
+      const rn = Math.min(200, Math.max(1, Math.round(num(it.rn, 1))));   // 横に並べる（スタッド@455 など）：本数・ピッチ
+      if (rn > 1) { o2.rn = rn; o2.rp = Math.max(1, num(it.rp, 455)); }
       return o2;
     }
     if (it.k === 'gl') { const p = pts(it.pts); return p.length >= 2 ? { ...base, ...(LINES[it.ln] && it.ln !== 'gl' ? { ln: it.ln } : {}), pts: p } : null; }
@@ -238,7 +242,31 @@ function validSec(d) {
     const p = pts(it.pts);
     return p.length >= 2 ? { ...rb, pts: p, pitch: Math.max(10, num(it.pitch, 250)), start: Math.max(0, num(it.start, 125)) } : null;
   }).filter(Boolean);
-  return { name: String(o.name || '断面').slice(0, 40), cat: CATS.includes(o.cat) ? o.cat : '共通', depth: Math.max(10, num(o.depth, 1500)), edge: Math.max(0, num(o.edge, 30)), items };
+  const top = o.view === 'top' ? { view: 'top', base: num(o.base, 0) } : {};   // 上から見た断面（平断面）：高さ方向にのばす。base＝下端の高さ
+  return { name: String(o.name || '断面').slice(0, 40), cat: CATS.includes(o.cat) ? o.cat : '共通', ...top, depth: Math.max(10, num(o.depth, top.view ? 2400 : 1500)), edge: Math.max(0, num(o.edge, 30)), items };
+}
+/* --- 上から見た断面（11/17）---
+   座標：x＝横（壁の方向）、y＝上（上＝外。pts は [x, y] で、横から見た断面の [z, y] と同じ形で持つ）
+   立体にすると 高さ方向（上）に depth だけのばす。dot＝縦に通る鉄筋、bar＝横の筋を高さ方向に pitch で並べる */
+const isTopSec = d => !!d && d.view === 'top';
+const secAx = d => isTopSec(d) ? { h: 'x', v: '奥', hName: '横（壁の方向）', vName: '奥（上＝外）', len: '高さ', lenLong: '高さ（上にのばす長さ）' }
+  : { h: 'z', v: 'y', hName: 'z（右＋）', vName: 'y（上＋、GL＝0）', len: '奥行', lenLong: '奥行（壁の中心線の長さ）' };
+// 横に並べたもの（rn 本・rp ピッチ）の形。1つ目は元の形
+const conCopies = it => { const out = [it.pts]; for (let i = 1; i < (it.rn || 1); i++) out.push(it.pts.map(p => [rr(p[0] + it.rp * i), p[1]])); return out; };
+// パーツの点（並べた写しも入れる）。全体表示・広さを測るとき用
+const allPts = it => it.k === 'dot' ? [[it.z, it.y]] : it.k === 'con' ? conCopies(it).flat() : it.pts;
+// 上から見た断面のひな形：2×4 外壁（スタッド 38×89 @455・GW16K・構造用合板9・石膏ボード12.5）。上＝外
+function wallPlanSection() {
+  const R = (x0, y0, w, h) => [[x0, y0], [rr(x0 + w), y0], [rr(x0 + w), rr(y0 + h)], [x0, rr(y0 + h)]];
+  const items = [
+    { k: 'con', mat: 'pb', name: '石膏ボード 12.5', pts: R(-19, -12.5, 1858, 12.5) },
+    { k: 'con', mat: 'gw', name: 'グラスウール 16K', dens: 16, pts: R(19, 0, 417, 89), rn: 4, rp: 455 },
+    { k: 'con', mat: 'wood', name: 'スタッド 2×4', pts: R(-19, 0, 38, 89), rn: 5, rp: 455 },
+    { k: 'con', mat: 'ply', name: '構造用合板 9', pts: R(-19, 89, 1858, 9) },
+    { k: 'gl', ln: 'kimitsu', name: '気密シート（気密ライン）', pts: [[-19, 0], [1839, 0]] },
+    { k: 'gl', ln: 'toshitsu', name: '透湿防水シート', pts: [[-19, 99], [1839, 99]] },
+  ];
+  return validSec({ name: '外壁 2×4（上から・スタッド@455）', cat: '共通', view: 'top', base: 0, depth: 2400, edge: 30, items });
 }
 
 // 「基礎を作る」と同じ寸法の断面（11/12 春田とすり合わせた形）
@@ -329,7 +357,7 @@ const stamp = t => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getD
 let delArmed = null;
 function renderList() {
   const cards = LIST.slice().sort((a, b) => b.t - a.t).map(x => `<div class="card"><b><span class="cat">${esc(x.sec.cat)}</span>${esc(x.sec.name)}</b>
-    <div class="meta">${stamp(x.t)}・奥行 ${x.sec.depth}・${x.sec.items.length} 個</div>
+    <div class="meta">${stamp(x.t)}・${isTopSec(x.sec) ? '上から・高さ' : '奥行'} ${x.sec.depth}・${x.sec.items.length} 個</div>
     <div class="row"><button class="btn pri" data-open="${x.id}">開く</button><button class="btn" data-send="${x.id}">PCへ送る</button><button class="btn" data-dup="${x.id}">複製</button><button class="btn dan${delArmed === x.id ? ' armed' : ''}" data-del="${x.id}">${delArmed === x.id ? 'もう一度で消す' : '消す'}</button></div></div>`);
   $('#l-cards').innerHTML = cards.join('') || '<p class="muted">まだありません。「＋ 新しい断面」から作ってください。</p>';
 }
@@ -346,7 +374,8 @@ $('#l-cards').addEventListener('click', e => {
 $('#l-new').onclick = () => { $('#m-new').hidden = false; };
 $('#n-ok').onclick = () => {
   const v = $('#n-tpl').value;
-  const sec = v === 'betastd' ? betaStdSection() : v === 'blank' ? validSec({ name: '新しい断面', cat: 'べた', depth: 1500, edge: 30, items: [] }) : foundationSection(foundDefaults(v));
+  const sec = v === 'betastd' ? betaStdSection() : v === 'blank' ? validSec({ name: '新しい断面', cat: 'べた', depth: 1500, edge: 30, items: [] })
+    : v === 'blanktop' ? validSec({ name: '新しい断面（上から）', cat: '共通', view: 'top', depth: 2400, edge: 30, items: [] }) : v === 'wall24' ? wallPlanSection() : foundationSection(foundDefaults(v));
   const x = { id: newId(), t: Date.now(), sec };
   LIST.push(x); saveList(); closeModals(); openSec(x.id);
 };
@@ -358,6 +387,7 @@ function closeModals() { $$('.modal').forEach(m => { m.hidden = true; }); }
 const NOTE = {
   中身: 'スマホの「断面づくり」で作った断面。PCのブロックイラスト作成アプリで「データ保存・読込」→ この文字を貼って「この文字から読み込む」と、左の「登録部材」に入る',
   断面の座標: 'z＝右（床下側が＋）、y＝上。壁の中心 z=0、GL＝y=0。単位 mm',
+  上から見た断面: 'view＝"top" のとき。pts の [x, y] は x＝横（壁の方向）、y＝上が外。立体にすると base から depth だけ上にのばす。con の rn・rp＝横に並べる本数・ピッチ',
 };
 const unitsText = xs => JSON.stringify({ app: 'block-illust-units', version: 1, from: '断面づくり（スマホ）', 説明: NOTE, units: xs.map(x => ({ kind: 'sec', name: x.sec.name, cat: x.sec.cat, sec: x.sec })) }, null, 1);
 let sendList = [];
@@ -413,6 +443,7 @@ function openSec(id) {
   const x = LIST.find(o => o.id === id); if (!x) return;
   E.x = x; E.def = x.sec; E.sel = -1; E.selV = null; E.draft = []; E.hist = []; E.fut = []; E.meas = [];
   $('#list').hidden = true; $('#ed').hidden = false;
+  $('#h-pos').textContent = `${secAx(E.def).h} 0　${secAx(E.def).v} 0`;
   setTool('sel'); requestAnimationFrame(() => { fit(); render(); });
 }
 $('#e-back').onclick = () => { $('#ed').hidden = true; $('#list').hidden = false; renderList(); };
@@ -426,7 +457,7 @@ $('#e-redo').onclick = () => { if (!E.fut.length) return; E.hist.push(JSON.strin
 function itemPts(it) { return it.k === 'dot' ? [[it.z, it.y]] : it.pts; }
 function fit() {
   let z0 = Infinity, z1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const it of E.def.items) for (const p of itemPts(it)) { z0 = Math.min(z0, p[0]); z1 = Math.max(z1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+  for (const it of E.def.items) for (const p of allPts(it)) { z0 = Math.min(z0, p[0]); z1 = Math.max(z1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
   if (!isFinite(z0)) { z0 = -300; z1 = 700; y0 = -400; y1 = 500; }
   const w = W() || 360, h = H() || 300, m = 30;
   const s = Math.min((w - 2 * m) / Math.max(50, z1 - z0), (h - 2 * m - 20) / Math.max(50, y1 - y0));
@@ -476,12 +507,16 @@ function render() {
   for (let z = Math.ceil(zA / g) * g; z <= zB; z += g) grid += `<line x1="${sx(z)}" y1="0" x2="${sx(z)}" y2="${h}" stroke="${z % G === 0 ? '#d3dbe4' : '#eef1f4'}"/>`;
   for (let y = Math.ceil(yA / g) * g; y <= yB; y += g) grid += `<line x1="0" y1="${sy(y)}" x2="${w}" y2="${sy(y)}" stroke="${y % G === 0 ? '#d3dbe4' : '#eef1f4'}"/>`;
   out.push(grid);
-  out.push(`<line x1="${sx(0)}" y1="0" x2="${sx(0)}" y2="${h}" stroke="#9fb0c2" stroke-dasharray="4 4"/><line x1="0" y1="${sy(0)}" x2="${w}" y2="${sy(0)}" stroke="#b08a5a" stroke-dasharray="6 4"/>`);
-  out.push(`<text x="${w - 6}" y="${sy(0) - 4}" text-anchor="end" font-size="11" fill="#7a5a2e">GL ±0</text>`);
+  const TOP = isTopSec(E.def);
+  out.push(`<line x1="${sx(0)}" y1="0" x2="${sx(0)}" y2="${h}" stroke="#9fb0c2" stroke-dasharray="4 4"/><line x1="0" y1="${sy(0)}" x2="${w}" y2="${sy(0)}" stroke="${TOP ? '#9fb0c2' : '#b08a5a'}" stroke-dasharray="6 4"/>`);
+  if (TOP) out.push(`<text x="${w / 2}" y="44" text-anchor="middle" font-size="12" fill="#7a8693">↑ 外</text><text x="${w / 2}" y="${h - 8}" text-anchor="middle" font-size="12" fill="#7a8693">↓ 室内</text>`);
+  else out.push(`<text x="${w - 6}" y="${sy(0) - 4}" text-anchor="end" font-size="11" fill="#7a5a2e">GL ±0</text>`);
   const P = pts => pts.map(p => `${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join(' ');
   E.def.items.forEach((it, i) => {
     const on = i === E.sel;
-    if (it.k === 'con') out.push(`<polygon points="${P(it.pts)}" fill="${(MATS[it.mat] || MATS.con).fill}" stroke="${on ? '#e0a800' : '#56616d'}" stroke-width="${on ? 3 : 1.2}" stroke-linejoin="round"/>`);
+    if (it.k !== 'con') return;
+    out.push(`<polygon points="${P(it.pts)}" fill="${(MATS[it.mat] || MATS.con).fill}" stroke="${on ? '#e0a800' : '#56616d'}" stroke-width="${on ? 3 : 1.2}" stroke-linejoin="round"/>`);
+    for (const cp of conCopies(it).slice(1)) out.push(`<polygon points="${P(cp)}" fill="${(MATS[it.mat] || MATS.con).fill}" stroke="${on ? '#e0a800' : '#56616d'}" stroke-width="${on ? 2 : 1}" stroke-dasharray="5 3" stroke-linejoin="round"/>`);
   });
   E.def.items.forEach((it, i) => {
     const on = i === E.sel, col = itemColor(it), wpx = Math.max(2, dia(it) * E.V.s);
@@ -590,6 +625,11 @@ function renderProps() {
       if (MATS[it.mat] && MATS[it.mat].wood) h += `<div class="row">${Object.keys(WOOD_SIZES).map(k => `<button class="btn" data-act="wsize" data-v="${k}">${k.replace(/（.*）/, '')}</button>`).join('')}<button class="btn" data-act="swap">縦横入れ替え</button></div>`;
     }
     const ins = it.k === 'con' ? insInfo(it) : null;
+    if (it.k === 'con') {   // 横に並べる（スタッド@455 など）
+      const n = it.rn || 1, rp = it.rp || 455;
+      h += `<div class="g2"><label class="f">並べる本数（横へ）<input data-k="rn" type="number" inputmode="numeric" min="1" max="200" value="${n}"></label><label class="f">ピッチ @<input data-k="rp" type="number" inputmode="decimal" value="${rp}" list="cpitch"></label></div><datalist id="cpitch"><option value="303"></option><option value="455"></option><option value="606"></option><option value="910"></option></datalist>`;
+      if (n > 1) h += `<p class="muted" style="margin:0">${n} 本 @${rp}（2本目からは点線のふち）</p>`;
+    }
     if (ins) {
       const M = MATS[it.mat];
       h += `<div class="g2">${M.ins === 'gw' ? `<label class="f">密度（kg/m³）<select data-k="dens">${GW_DENS.map(v => `<option value="${v}"${v === (it.dens || 16) ? ' selected' : ''}>${v}K</option>`).join('')}</select></label>` : ''}<label class="f">熱伝導率 λ（W/mK）<input data-k="lam" type="number" inputmode="decimal" step="0.001" value="${ins.lam}"></label></div>`;
@@ -600,18 +640,22 @@ function renderProps() {
       h += `<div class="g2"><label class="f">径<select data-k="rk">${opts(['D10', 'D13', 'D16', 'D19'], it.rk)}</select></label><label class="f">役割（色）<select data-k="role">${opts(Object.keys(REBAR_ROLES), it.role)}</select></label></div>`;
       if (cv) h += `<div class="note">かぶり（鉄筋の表面 → コンクリートの面、一番近い所）：<b>${rr(cv.d)} mm</b></div>`;
     }
-    if (it.k === 'dot') h += `<div class="g2"><label class="f">z（右＋）<input data-k="z" type="number" inputmode="decimal" value="${it.z}"></label><label class="f">y（上＋、GL＝0）<input data-k="y" type="number" inputmode="decimal" value="${it.y}"></label></div>`;
+    const AX = secAx(d);
+    if (it.k === 'dot') h += `<div class="g2"><label class="f">${AX.hName}<input data-k="z" type="number" inputmode="decimal" value="${it.z}"></label><label class="f">${AX.vName}<input data-k="y" type="number" inputmode="decimal" value="${it.y}"></label></div>${isTopSec(d) ? '<p class="muted" style="margin:0">上から見た断面の通し筋＝縦に通る鉄筋</p>' : ''}`;
     if (it.k === 'bar') {
       const n = barCount(it, d.depth);
-      h += `<div class="g2"><label class="f">ピッチ @<input data-k="pitch" type="number" inputmode="decimal" value="${it.pitch}"></label><label class="f">最初の位置（端から）<input data-k="start" type="number" inputmode="decimal" value="${it.start}"></label></div><p class="muted" style="margin:0">奥行 ${d.depth} の中に ${n} 本${it.pitch > 250 ? '　<b style="color:#c62828">@250 を超えています</b>' : ''}</p>`;
+      h += `<div class="g2"><label class="f">ピッチ @<input data-k="pitch" type="number" inputmode="decimal" value="${it.pitch}"></label><label class="f">最初の位置（端から）<input data-k="start" type="number" inputmode="decimal" value="${it.start}"></label></div><p class="muted" style="margin:0">${AX.len} ${d.depth} の中に ${n} 本${it.pitch > 250 ? '　<b style="color:#c62828">@250 を超えています</b>' : ''}</p>`;
     }
     if (it.k !== 'dot') {
-      h += `<label class="f">点の座標「z, y」（1行に1点）<textarea data-k="pts" spellcheck="false">${it.pts.map(p => p.join(', ')).join('\n')}</textarea></label>`;
+      h += `<label class="f">点の座標「${AX.h}, ${AX.v}」（1行に1点）<textarea data-k="pts" spellcheck="false">${it.pts.map(p => p.join(', ')).join('\n')}</textarea></label>`;
       h += `<div class="row"><button class="btn" data-act="addpt"${E.selV == null ? ' disabled' : ''}>選んだ点の次に点を足す</button><button class="btn" data-act="delpt"${E.selV == null ? ' disabled' : ''}>選んだ点を消す</button></div>`;
     }
   } else if (E.tool === 'sel') {
     h += `<label class="f">断面の名前<input data-s="name" value="${esc(d.name)}" maxlength="40"></label>`;
-    h += `<div class="g3"><label class="f">区分<select data-s="cat">${opts(CATS, d.cat)}</select></label><label class="f">奥行（PCで立体にする長さ）<input data-s="depth" type="number" inputmode="decimal" value="${d.depth}"></label><label class="f">通し筋の端あき<input data-s="edge" type="number" inputmode="decimal" value="${d.edge}"></label></div>`;
+    const TOP = isTopSec(d);
+    h += `<div class="g2"><label class="f">向き<select data-s="view"><option value="side"${TOP ? '' : ' selected'}>横から見た断面</option><option value="top"${TOP ? ' selected' : ''}>上から見た断面</option></select></label>${TOP ? `<label class="f">下端の高さ<input data-s="base" type="number" inputmode="decimal" value="${d.base || 0}"></label>` : ''}</div>`;
+    h += `<div class="g3"><label class="f">区分<select data-s="cat">${opts(CATS, d.cat)}</select></label><label class="f">${TOP ? '高さ（上にのばす）' : '奥行（PCで立体にする長さ）'}<input data-s="depth" type="number" inputmode="decimal" value="${d.depth}"></label><label class="f">通し筋の端あき<input data-s="edge" type="number" inputmode="decimal" value="${d.edge}"></label></div>`;
+    if (TOP) h += `<p class="note" style="margin:0">上から見た断面：横＝壁の方向、上＝外。スタッドは1本描いて「並べる本数・ピッチ」で @455 に。PCで立体にすると上にのびます。</p>`;
     h += `<p class="muted" style="margin:0">${d.items.length} 個。パーツをタップすると、ここで名前・径・座標を直せます。</p>`;
   }
   box.innerHTML = h;
@@ -638,11 +682,17 @@ function renderSum() {
 $('#props').addEventListener('change', e => {
   const el = e.target, d = E.def;
   if (el.dataset.n) { const k = el.dataset.n; E.next[k] = ['pitch', 'start'].includes(k) ? Math.max(0, +el.value || E.next[k]) : el.value; if (k === 'size' && el.value && !MATS[E.next.mat].wood) { E.next.mat = 'wood'; renderProps(); } return; }
-  if (el.dataset.s) { const k = el.dataset.s; mutate(() => { d[k] = ['depth', 'edge'].includes(k) ? +el.value : el.value; }); return; }
+  if (el.dataset.s) {
+    const k = el.dataset.s;
+    mutate(() => { if (k === 'view') { if (el.value === 'top') { d.view = 'top'; d.base = d.base || 0; } else { delete d.view; delete d.base; } } else d[k] = ['depth', 'edge', 'base'].includes(k) ? +el.value : el.value; });
+    return;
+  }
   const k = el.dataset.k, it = d.items[E.sel]; if (!k || !it) return;
   mutate(() => {
     if (k === 'pts') { const p = el.value.split(/\n+/).map(l => l.split(/[,\s、]+/).filter(Boolean).map(Number)).filter(a => a.length >= 2 && a.every(isFinite)); if (p.length >= (it.k === 'con' ? 3 : 2)) it.pts = p; else toast('点が足りません'); }
     else if (['z', 'y', 'pitch', 'start'].includes(k)) { if (isFinite(+el.value) && el.value !== '') it[k] = +el.value; }
+    else if (k === 'rn') { const n = Math.min(200, Math.max(1, Math.round(+el.value || 1))); if (n > 1) { it.rn = n; it.rp = it.rp || 455; } else { delete it.rn; delete it.rp; } }
+    else if (k === 'rp') { const v = +el.value; if (v > 0) { it.rp = v; if (!(it.rn > 1)) it.rn = 2; } }
     else if (k === 'w' || k === 'h') { const v = +el.value, b = rectOf(it); if (b && v > 0) setRect(it, b.z, b.y, k === 'w' ? v : b.w, k === 'h' ? v : b.h); }
     else if (k === 'dens') { it.dens = +el.value; delete it.lam; }   // 密度を変えたら λ は目安に戻す
     else if (k === 'lam') { const v = +el.value; if (v > 0) it.lam = v; else delete it.lam; }
@@ -708,7 +758,7 @@ function local(e) { const r = svg.getBoundingClientRect(); return [e.clientX - r
 // 点に吸い付く（14px 以内）、なければ目盛
 function snapPt(px, py, skip) {
   let best = null;
-  E.def.items.forEach((it, i) => { if (i === skip) return; for (const p of itemPts(it)) { const d = Math.hypot(sx(p[0]) - px, sy(p[1]) - py); if (d < 14 && (!best || d < best.d)) best = { d, p }; } });
+  E.def.items.forEach((it, i) => { if (i === skip) return; for (const p of allPts(it)) { const d = Math.hypot(sx(p[0]) - px, sy(p[1]) - py); if (d < 14 && (!best || d < best.d)) best = { d, p }; } });
   return best ? [best.p[0], best.p[1]] : [snapG(wz(px)), snapG(wy(py))];
 }
 function hitItem(px, py) {
@@ -720,14 +770,14 @@ function hitItem(px, py) {
   });
   if (hit >= 0) return hit;
   let area = Infinity;   // コンクリート：中に入っている一番小さいもの
-  E.def.items.forEach((it, i) => { if (it.k !== 'con' || !inPoly(p, it.pts)) return; const a = Math.abs(polyArea(it.pts)); if (a < area) { area = a; hit = i; } });
+  E.def.items.forEach((it, i) => { if (it.k !== 'con' || !conCopies(it).some(P => inPoly(p, P))) return; const a = Math.abs(polyArea(it.pts)); if (a < area) { area = a; hit = i; } });
   return hit;
 }
 const polyArea = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
 function inPoly(p, P) { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; }
 function measSnap(px, py) {
   let best = null;
-  for (const it of E.def.items) for (const p of itemPts(it)) { const d = Math.hypot(sx(p[0]) - px, sy(p[1]) - py); if (d < 16 && (!best || d < best.d)) best = { d, p: [p[0], p[1]] }; }
+  for (const it of E.def.items) for (const p of allPts(it)) { const d = Math.hypot(sx(p[0]) - px, sy(p[1]) - py); if (d < 16 && (!best || d < best.d)) best = { d, p: [p[0], p[1]] }; }
   if (best) return best.p;
   const w = [wz(px), wy(py)];
   if (E.meas.length === 1) {   // 線の上：1点目からの直角の足
@@ -758,10 +808,10 @@ svg.addEventListener('pointerdown', e => {
 });
 svg.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) {
-    const p = local(e); $('#h-pos').textContent = `z ${Math.round(wz(p[0]))}　y ${Math.round(wy(p[1]))}`; return;
+    const p = local(e); $('#h-pos').textContent = `${secAx(E.def).h} ${Math.round(wz(p[0]))}　${secAx(E.def).v} ${Math.round(wy(p[1]))}`; return;
   }
   const p = local(e); ptrs.set(e.pointerId, p);
-  $('#h-pos').textContent = `z ${Math.round(wz(p[0]))}　y ${Math.round(wy(p[1]))}`;
+  $('#h-pos').textContent = `${secAx(E.def).h} ${Math.round(wz(p[0]))}　${secAx(E.def).v} ${Math.round(wy(p[1]))}`;
   if (!gest) return;
   if (gest.kind === 'pinch' && ptrs.size === 2) {
     const [a, b] = [...ptrs.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
